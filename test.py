@@ -127,8 +127,9 @@ def prover_test_dummy_verifier(setup):
         X_2=vk.X_2,
         w=vk.w,
     )
-
+    print("HI")
     assert vk_test.verify_proof_unoptimized(8, proof, public)
+    print("HI2")
     assert vk_test.verify_proof(8, proof, public)
     print("Prover test with dummy verifier success")
 
