@@ -74,22 +74,76 @@ class VerificationKey:
     # Basic, easier-to-understand version of what's going on
     def verify_proof_unoptimized(self, group_order: int, pf, public=[]) -> bool:
         # 4. Compute challenges
-
+        beta, gamma, alpha, zeta, v, u = self.compute_challenges(pf)
         # 5. Compute zero polynomial evaluation Z_H(ζ) = ζ^n - 1
-
+        zh_eval = zeta ** group_order - 1
         # 6. Compute Lagrange polynomial evaluation L_0(ζ)
-
+        l0_eval = Polynomial([Scalar(1)] + [Scalar(0)] * (group_order - 1), Basis.LAGRANGE).barycentric_eval(zeta)
         # 7. Compute public input polynomial evaluation PI(ζ).
-
+        pi_eval = Polynomial([Scalar(-x) for x in public] + [Scalar(0)] * (group_order - len(public)), Basis.LAGRANGE).barycentric_eval(zeta)
         # Recover the commitment to the linearization polynomial R,
         # exactly the same as what was created by the prover
+        proof = pf.flatten()
+
+        def rlc(x, y):
+            return x + beta * y + gamma
+        # BIG1 = QM * (self.a_eval * self.b_eval) + QL * self.a_eval + QR * self.b_eval + QO * self.c_eval + self.PI.barycentric_eval(self.zeta) + QC
+        # BIG2 = Z * (self.a_eval + self.zeta * self.beta + self.gamma) * (self.b_eval + self.zeta * (2 * self.beta) + self.gamma) * (self.c_eval + self.zeta * (3 * self.beta) + self.gamma) * self.alpha
+        # BIG2 -= (S3 * self.beta + self.gamma + self.c_eval) * self.z_shifted_eval * (self.a_eval + self.s1_eval * self.beta + self.gamma) * (self.b_eval + self.s2_eval * self.beta + self.gamma) * self.alpha
+        # BIG3 = (Z - Scalar(1)) * l0_eval * (self.alpha ** 2)
+        # BIG4 = (T1 + T2 * (self.zeta ** self.group_order) + T3 * (self.zeta ** (2*self.group_order))) * zh_eval
+        r_commit = ec_lincomb((
+            (self.Qm, proof["a_eval"] * proof["b_eval"]),
+            (self.Ql, proof["a_eval"]),
+            (self.Qr, proof["b_eval"]),
+            (self.Qo, proof["c_eval"]),
+            (b.G1, pi_eval),
+            (self.Qc, Scalar(1)),
+            (proof["z_1"], alpha * rlc(proof["a_eval"], zeta) * rlc(proof["b_eval"], 2*zeta) * rlc(proof["c_eval"], 3*zeta)),
+            (self.S3, - alpha * beta * proof["z_shifted_eval"] * rlc(proof["a_eval"], proof["s1_eval"]) * rlc(proof["b_eval"], proof["s2_eval"])),
+            (b.G1, - alpha * (gamma + proof["c_eval"]) * proof["z_shifted_eval"] * rlc(proof["a_eval"], proof["s1_eval"]) * rlc(proof["b_eval"], proof["s2_eval"])),
+            (proof["z_1"], (alpha ** 2) * l0_eval),
+            (b.G1, - l0_eval * (alpha ** 2)),
+            (proof["t_lo_1"], - zh_eval),
+            (proof["t_mid_1"], - zh_eval * (zeta ** group_order)),
+            (proof["t_hi_1"], - zh_eval * (zeta ** (2 * group_order)))
+        ))
+        print(r_commit)
+        
 
         # Verify that R(z) = 0 and the prover-provided evaluations
         # A(z), B(z), C(z), S1(z), S2(z) are all correct
-
+        assert b.pairing(
+            b.add(self.X_2, ec_mul(b.G2, -zeta)),
+            proof["W_z_1"]
+        ) == b.pairing(
+            b.G2,
+            ec_lincomb((
+                (r_commit, Scalar(1)),
+                (proof["a_1"], v),
+                (b.G1, - proof["a_eval"] * v),
+                (proof["b_1"], v**2),
+                (b.G1, - proof["b_eval"] * v**2),
+                (proof["c_1"], v**3),
+                (b.G1, - proof["c_eval"] * v**3),
+                (self.S1, v**4),
+                (b.G1, - proof["s1_eval"] * v**4),
+                (self.S2, v**5),
+                (b.G1, - proof["s2_eval"] * v**5)
+            ))
+        )
         # Verify that the provided value of Z(zeta*w) is correct
-
-        return False
+        assert b.pairing(
+            b.add(self.X_2, ec_mul(b.G2, -zeta*Scalar.root_of_unity(group_order))),
+            proof["W_zw_1"]
+        ) == b.pairing(
+            b.G2,
+            ec_lincomb((
+                (proof["z_1"], Scalar(1)),
+                (b.G1, - proof["z_shifted_eval"])
+            ))
+        )
+        return True
 
     # Compute challenges (should be same as those computed by prover)
     def compute_challenges(
