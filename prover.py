@@ -319,6 +319,7 @@ class Prover:
                 self.Z, self.pk.S3
             ]
         ]
+        
         # Compute the "linearization polynomial" R. This is a clever way to avoid
         # needing to provide evaluations of _all_ the polynomials that we are
         # checking an equation betweeen: instead, we can "skip" the first
@@ -332,8 +333,7 @@ class Prover:
         # it has to be "linear" in the proof items, hence why we can only use each
         # proof item once; any further multiplicands in each term need to be
         # replaced with their evaluations at Z, which do still need to be provided
-
-        BIG1 = QM * (self.a_eval * self.b_eval) + QL * self.a_eval + QR * self.b_eval + QO * self.c_eval + self.fft_expand(self.PI) + QC
+        BIG1 = QM * (self.a_eval * self.b_eval) + QL * self.a_eval + QR * self.b_eval + QO * self.c_eval + self.PI.barycentric_eval(self.zeta) + QC
         BIG2 = Z * (self.a_eval + self.zeta * self.beta + self.gamma) * (self.b_eval + self.zeta * (2 * self.beta) + self.gamma) * (self.c_eval + self.zeta * (3 * self.beta) + self.gamma) * self.alpha
         BIG2 -= (S3 * self.beta + self.gamma + self.c_eval) * self.z_shifted_eval * (self.a_eval + self.s1_eval * self.beta + self.gamma) * (self.b_eval + self.s2_eval * self.beta + self.gamma) * self.alpha
         BIG3 = (Z - Scalar(1)) * l0_eval * (self.alpha ** 2)
@@ -385,7 +385,6 @@ class Prover:
         W_z += (S2 - self.s2_eval) * (self.v ** 5)
         W_z /= (X - self.zeta)
         W_z = self.expanded_evals_to_coeffs(W_z)
-
         # Check that degree of W_z is not greater than n
         assert W_z.values[self.group_order:] == [0] * (self.group_order * 3)
 
@@ -401,6 +400,7 @@ class Prover:
 
         W_zw = (Z - self.z_shifted_eval) / (X - self.zeta * Scalar.root_of_unity(self.group_order))
         W_zw = self.expanded_evals_to_coeffs(W_zw)
+
         # Check that degree of W_z is not greater than n
         assert W_zw.values[self.group_order:] == [0] * (self.group_order * 3)
 
