@@ -234,7 +234,9 @@ class TestingVerificationKey:
 
         # Verify that R(z) = 0 and the prover-provided evaluations
         # A(z), B(z), C(z), S1(z), S2(z) are all correct
-        tmp = ec_lincomb(
+        assert b.pairing(
+            b.G2,
+            ec_lincomb(
                 [
                     (R_pt, 1),
                     (proof["a_1"], v),
@@ -248,17 +250,8 @@ class TestingVerificationKey:
                     (self.S2, v**5),
                     (b.G1, -(v**5) * proof["s2_eval"]),
                 ]
-            )
-        print("Calculated tmp")
-        tmp2 = b.pairing(
-            b.G2,
-            tmp
-        ) 
-        print("calculated tmp2")
-        try:
-            assert tmp2 == b.pairing(b.add(self.X_2, ec_mul(b.G2, -zeta)), proof["W_z_1"])
-        except AssertionError:
-            print("OOPS")
+            ),
+        ) == b.pairing(b.add(self.X_2, ec_mul(b.G2, -zeta)), proof["W_z_1"])
         print("done check 1")
 
         # Verify that the provided value of Z(zeta*w) is correct
