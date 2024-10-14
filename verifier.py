@@ -39,19 +39,82 @@ class VerificationKey:
     # efficiently batch them
     def verify_proof(self, group_order: int, pf, public=[]) -> bool:
         # 4. Compute challenges
-
+        beta, gamma, alpha, zeta, v, u = self.compute_challenges(pf)
         # 5. Compute zero polynomial evaluation Z_H(ζ) = ζ^n - 1
-
+        zh_eval = zeta ** group_order - 1
         # 6. Compute Lagrange polynomial evaluation L_0(ζ)
-
+        l0_eval = Polynomial([Scalar(1)] + [Scalar(0)] * (group_order - 1), Basis.LAGRANGE).barycentric_eval(zeta)
         # 7. Compute public input polynomial evaluation PI(ζ).
+        pi_eval = Polynomial([Scalar(-x) for x in public] + [Scalar(0)] * (group_order - len(public)), Basis.LAGRANGE).barycentric_eval(zeta)
 
         # Compute the constant term of R. This is not literally the degree-0
         # term of the R polynomial; rather, it's the portion of R that can
         # be computed directly, without resorting to elliptic cutve commitments
-
+        proof = pf.flatten()
+        def rlc(x, y):
+            return x + beta * y + gamma
+        # r_commit = ec_lincomb((
+        #     (self.Qm, proof["a_eval"] * proof["b_eval"]),
+        #     (self.Ql, proof["a_eval"]),
+        #     (self.Qr, proof["b_eval"]),
+        #     (self.Qo, proof["c_eval"]),
+        #     (b.G1, pi_eval),
+        #     (self.Qc, Scalar(1)),
+        #     (proof["z_1"], alpha * rlc(proof["a_eval"], zeta) * rlc(proof["b_eval"], 2*zeta) * rlc(proof["c_eval"], 3*zeta)),
+        #     (self.S3, - alpha * beta * proof["z_shifted_eval"] * rlc(proof["a_eval"], proof["s1_eval"]) * rlc(proof["b_eval"], proof["s2_eval"])),
+        #     (b.G1, - alpha * (gamma + proof["c_eval"]) * proof["z_shifted_eval"] * rlc(proof["a_eval"], proof["s1_eval"]) * rlc(proof["b_eval"], proof["s2_eval"])),
+        #     (proof["z_1"], (alpha ** 2) * l0_eval),
+        #     (b.G1, - l0_eval * (alpha ** 2)),
+        #     (proof["t_lo_1"], - zh_eval),
+        #     (proof["t_mid_1"], - zh_eval * (zeta ** group_order)),
+        #     (proof["t_hi_1"], - zh_eval * (zeta ** (2 * group_order)))
+        # ))
+        # print(r_commit)
+        r0 = pi_eval 
+        r0 += - alpha * (gamma + proof["c_eval"]) * proof["z_shifted_eval"] * rlc(proof["a_eval"], proof["s1_eval"]) * rlc(proof["b_eval"], proof["s2_eval"])
+        r0 += - l0_eval * (alpha ** 2)
         # Compute D = (R - r0) + u * Z, and E and F
 
+        # Let S(t) be the polynomial R(t) + v A(t) + v^2 B(t) + ...
+        # We are trying to check that S(x) - S(zeta) = (x - zeta)W_z(x)
+        # or equivalently S(x) - S(zeta) + zeta W_z(x) = x(W_z(x))
+        # Similarly we are trying to check that Z(x) - Zshift(zeta) + w*zeta*W_zw(x) = x(W_zw(x))
+        # In order to do this we take a random u and check that
+        # S(x) - S(zeta) + zeta W_z(x) + u * (Z(x) - Zshift(zeta) + w*zeta*W_zw(x))
+        #   = x(W_z(x) + u * W_zw(x))
+        # To rewrite,
+        # (S(x) - r0) + zeta W_z(x) + u Z(x) + u*w*zeta*W_zw(x) (let this be P1)
+        # + r0 - S(zeta) - u*Zshift(zeta) (let this be P2)
+        # = x(W_z(x) + u * W_zw(x))
+
+        s_eval = proof["a_eval"] * v + proof["b_eval"] * v**2 + proof["c_eval"] * v**3 + proof["s1_eval"] * v**4 + proof["s2_eval"] * v**5
+        p2 = r0 - s_eval - u* proof["z_shifted_eval"]
+        P1 = ec_lincomb((
+            (self.Qm, proof["a_eval"] * proof["b_eval"]),
+            (self.Ql, proof["a_eval"]),
+            (self.Qr, proof["b_eval"]),
+            (self.Qo, proof["c_eval"]),
+            (self.Qc, Scalar(1)),
+            (proof["z_1"], (
+                alpha * rlc(proof["a_eval"], zeta) * rlc(proof["b_eval"], 2*zeta) * rlc(proof["c_eval"], 3*zeta)) \
+                + (alpha ** 2) * l0_eval \
+                + u
+            ),
+            #(proof["z_1"], alpha * rlc(proof["a_eval"], zeta) * rlc(proof["b_eval"], 2*zeta) * rlc(proof["c_eval"], 3*zeta)),
+            (self.S3, - alpha * beta * proof["z_shifted_eval"] * rlc(proof["a_eval"], proof["s1_eval"]) * rlc(proof["b_eval"], proof["s2_eval"])),
+            #(proof["z_1"], (alpha ** 2) * l0_eval),
+            (proof["t_lo_1"], - zh_eval),
+            (proof["t_mid_1"], - zh_eval * (zeta ** group_order)),
+            (proof["t_hi_1"], - zh_eval * (zeta ** (2 * group_order))),
+            #(proof["z_1"], u),
+            (proof["a_1"], v),
+            (proof["b_1"], v**2),
+            (proof["c_1"], v**3),
+            (self.S1, v**4),
+            (self.S2, v**5),
+            (proof["W_z_1"], zeta),
+            (proof["W_zw_1"], u*Scalar.root_of_unity(group_order)*zeta)
+        ))
         # Run one pairing check to verify the last two checks.
         # What's going on here is a clever re-arrangement of terms to check
         # the same equations that are being checked in the basic version,
@@ -69,7 +132,20 @@ class VerificationKey:
         # so at this point we can take a random linear combination of the two
         # checks, and verify it with only one pairing.
 
-        return False
+        assert b.pairing(
+            self.X_2,
+            ec_lincomb((
+                (proof["W_z_1"], Scalar(1)),
+                (proof["W_zw_1"], u)
+            ))
+        ) == b.pairing(
+            b.G2,
+            ec_lincomb((
+                (b.G1, p2),
+                (P1, Scalar(1))
+            ))
+        )
+        return True
 
     # Basic, easier-to-understand version of what's going on
     def verify_proof_unoptimized(self, group_order: int, pf, public=[]) -> bool:
