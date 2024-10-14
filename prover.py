@@ -99,10 +99,10 @@ class Prover:
         # - C_values: witness[program.wires()[i].O]
         self.values = [[Scalar(witness[name]) for name in wire.as_list()] for wire in program.wires()]
         poly_values = zip(*self.values)
+        def pad(v):
+            return v + (Scalar(0),) * (group_order - len(v))
+        polys = [Polynomial(pad(value), Basis.LAGRANGE) for value in poly_values]
 
-        blinding_const = 5
-        polys = [Polynomial(value + (Scalar(0),)*blinding_const, Basis.LAGRANGE) for value in poly_values]
-        
         self.A = polys[0]
         self.B = polys[1]
         self.C = polys[2]
